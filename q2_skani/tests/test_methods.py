@@ -168,12 +168,13 @@ class SkaniTests(TestPluginBase):
         matrix_file = self.get_data_path("test.matrix")
 
         df_obs = _process_skani_matrix(str(matrix_file))
-        df_exp = pd.DataFrame({
-            "genome1": [0.0, 0.1, 0.2],
-            "genome2": [0.1, 0.0, 0.3],
-            "genome3": [0.2, 0.3, 0.0]
-        },
-            index = pd.Index(["genome1", "genome2", "genome3"], name="id")
+        df_exp = pd.DataFrame(
+            {
+                "genome1": [0.0, 0.1, 0.2],
+                "genome2": [0.1, 0.0, 0.3],
+                "genome3": [0.2, 0.3, 0.0],
+            },
+            index=pd.Index(["genome1", "genome2", "genome3"], name="id"),
         )
         pd.testing.assert_frame_equal(df_obs, df_exp)
 
