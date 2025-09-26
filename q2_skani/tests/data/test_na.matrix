@@ -1,4 +1,4 @@
 3
-genome1 0.0 NA 0.2
-genome2 NA 0.0 0.3
-genome3 0.2 0.3 0.0 
+genome1.fasta	0.0	NA	0.2
+genome2.fasta	NA	0.0	0.3
+genome3.fasta	0.2	0.3	0.0

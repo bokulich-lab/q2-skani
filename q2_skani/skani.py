@@ -97,7 +97,7 @@ def _run_skani(cmd: List[str]) -> None:
         If Skani fails to run or returns a non-zero exit code
     """
     try:
-        result = subprocess.run(
+        subprocess.run(
             cmd,
             check=True,
             capture_output=True,
@@ -132,6 +132,7 @@ def _process_skani_matrix(matrix_file: str) -> pd.DataFrame:
     df = pd.read_csv(matrix_file, sep="\t", index_col=0, skiprows=1, header=None)
     df.index = df.index.map(lambda x: Path(x).stem)
     df.columns = df.index.tolist()
+    df.index.name = "id"
 
     # Convert ANI to distance if needed (100 - ANI)
     # if not df.values[0, 0] > 1:  # If values are ANI (0-100)

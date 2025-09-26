@@ -58,53 +58,39 @@ plugin.methods.register_function(
         "min_af": "Minimum aligned fraction to report (default: 15.0).",
         "compression": "Compression factor (k-mer subsampling rate) (default: 125).",
         "marker_c": "Marker k-mer compression factor (default: 1000).",
-        "screen": "Screen out pairs with approximately less than this % identity (default: 80.0).",
+        "screen": (
+            "Screen out pairs with approximately less than this "
+            "% identity (default: 80.0)."
+        ),
         "ci": "Output confidence intervals (default: False).",
         "detailed": "Print additional info (default: False).",
         "diagonal": "Output self-self comparisons (default: False).",
         "sparse": "Output sparse matrix format (default: False).",
-        "full_matrix": "Output full matrix instead of lower-triangular (default: True).",
+        "full_matrix": (
+            "Output full matrix instead of lower-triangular (default: True)."
+        ),
         "median": "Estimate median identity instead of mean (default: False).",
-        "no_learned_ani": "Disable regression model for ANI prediction (default: False).",
-        "robust": "Estimate mean after trimming off 10%/90% quantiles (default: False).",
+        "no_learned_ani": (
+            "Disable regression model for ANI prediction (default: False)."
+        ),
+        "robust": (
+            "Estimate mean after trimming off 10%/90% quantiles (default: False)."
+        ),
         "faster_small": "Filter small genomes more aggressively (default: False).",
-        "preset": "Preset mode to use: 'fast' (2x faster, less accurate), 'medium' (2x slower, more accurate), 'slow' (4x slower, most accurate), or 'small-genomes' (for genomes < 20 kb).",
+        "preset": (
+            "Preset mode to use: 'fast' (2x faster, less accurate), "
+            "'medium' (2x slower, more accurate), 'slow' (4x slower, most accurate), "
+            "or 'small-genomes' (for genomes < 20 kb)."
+        ),
     },
     output_descriptions={"distance_matrix": "The distance matrix."},
     name="Compare sequences using skani triangle mode",
     description=(
-        "Compare sequences using skani to compute Average Nucleotide Identity (ANI). "
-        "This method performs a many-to-many comparison of genomes using the triangle method, "
-        "which is more efficient for all-vs-all comparisons. skani is generally faster and "
-        "more robust than FastANI, especially for metagenome-assembled genomes (MAGs)."
+        "Compare sequences using skani to compute Average Nucleotide "
+        "Identity (ANI). This method performs a many-to-many comparison "
+        "of genomes using the triangle method, which is more efficient for "
+        "all-vs-all comparisons. skani is generally faster and more robust "
+        "than FastANI, especially for metagenome-assembled genomes (MAGs)."
     ),
     citations=[],
 )
-
-# plugin.methods.register_function(
-#     function=compare_seqs_skani,
-#     inputs={"genomes": FeatureData[MAG]},
-#     parameters={
-#         "threads": Int % Range(1, None),
-#         "min_fraction": Float % Range(0.0, 1.0, inclusive_end=True),
-#         "min_ani": Float % Range(0.0, 100.0, inclusive_end=True),
-#         "small_genomes": Bool,
-#     },
-#     outputs=[("distance_matrix", DistanceMatrix)],
-#     input_descriptions={"genomes": "The genomes to compare."},
-#     parameter_descriptions={
-#         "threads": "Number of threads to use (default: 3).",
-#         "min_fraction": "Minimum aligned fraction to report (default: 0.2).",
-#         "min_ani": "Minimum ANI to report (default: 80.0).",
-#         "small_genomes": "Optimize for small genomes (< 20kb) (default: False).",
-#     },
-#     output_descriptions={"distance_matrix": "The distance matrix."},
-#     name="Compare sequences using skani dist mode",
-#     description=(
-#         "Compare sequences using skani's pairwise comparison mode to compute Average Nucleotide Identity (ANI). "
-#         "This method performs a pairwise comparison of genomes using the dist mode. "
-#         "It provides a different set of parameters compared to the triangle mode, "
-#         "allowing for more control over the alignment fraction and ANI thresholds."
-#     ),
-#     citations=[],
-# )
