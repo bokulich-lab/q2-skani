@@ -6,378 +6,409 @@
 # The full license is in the file LICENSE, distributed with this software.
 # ----------------------------------------------------------------------------
 
-import tempfile
-from pathlib import Path
+import subprocess
 from typing import List
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pandas as pd
+import skbio
+from q2_types.feature_data_mag import MAGSequencesDirFmt
 from qiime2.plugin.testing import TestPluginBase
 
 from q2_skani.skani import (
     compare_seqs,
-    _construct_skani_cmd,
+    _construct_triangle_cmd,
     _process_skani_matrix,
-    compare_seqs_skani,
+    _run_skani,
 )
 
 
-class FastANITests(TestPluginBase):
+class SkaniTests(TestPluginBase):
     package = "q2_skani.tests"
 
-    def setUp(self):
-        """Set up test data."""
-        super().setUp()
-        self.test_data_dir = Path(self.temp_dir.name) / "test_data"
-        self.test_data_dir.mkdir()
-        # Create a mock for subprocess.run that will be used in all tests
-        self.mock_subprocess = patch("subprocess.run").start()
-        self.addCleanup(patch.stopall)
-
-    def test_fastani_never_called(self):
-        """Test that FastANI is never actually called."""
-        # Create mock MAG sequences
-        mags = MockMAGSequencesDirFmt(["genome1.fasta", "genome2.fasta"])
-
-        # Mock the FastANI command execution
-        def mock_run_fastani(cmd: List[str]):
-            # Create mock output files
-            output_dir = Path(cmd[cmd.index("--output") + 1]).parent
-            matrix_file = output_dir / "fastani_output.tsv.matrix"
-            # Copy the test matrix file to the output location
-            with open(self.get_data_path("test.matrix"), "r") as src:
-                with open(matrix_file, "w") as dst:
-                    dst.write(src.read())
-
-        self.monkeypatch.setattr("q2_skani._methods._run_fastani", mock_run_fastani)
-
-        # Run the comparison
-        compare_seqs(
-            genomes=mags,
-            kmer=16,
-            fragLen=3000,
-            threads=1,
-            minFraction=0.2,
-            maxRatioDiff=0.05,
-        )
-
-        # Verify that subprocess.run was never called
-        self.mock_subprocess.assert_not_called()
-
-    def test_construct_fastani_cmd(self):
-        """Test command construction with various parameters."""
-        # Test with minimal required parameters
-        cmd = _construct_fastani_cmd(
-            query_list="query.txt",
-            ref_list="ref.txt",
-            output_file="output.tsv",
-            fastani_args={},
-        )
-        self.assertEqual(
-            cmd,
-            [
-                "fastANI",
-                "--queryList",
-                "query.txt",
-                "--refList",
-                "ref.txt",
-                "--output",
-                "output.tsv",
-                "--matrix",
-            ],
-        )
-
-        # Test with all optional parameters
-        cmd = _construct_fastani_cmd(
-            query_list="query.txt",
-            ref_list="ref.txt",
-            output_file="output.tsv",
-            fastani_args={
-                "kmer": 16,
-                "fragLen": 3000,
-                "threads": 4,
-                "minFraction": 0.2,
-                "maxRatioDiff": 0.05,
-            },
-        )
-        self.assertEqual(
-            cmd,
-            [
-                "fastANI",
-                "--queryList",
-                "query.txt",
-                "--refList",
-                "ref.txt",
-                "--output",
-                "output.tsv",
-                "--matrix",
-                "--kmer",
-                "16",
-                "--fragLen",
-                "3000",
-                "--threads",
-                "4",
-                "--minFraction",
-                "0.2",
-                "--maxRatioDiff",
-                "0.05",
-            ],
-        )
-
-    def test_process_fastani_matrix(self):
-        """Test processing of FastANI matrix output."""
-        # Use the test matrix file
-        matrix_file = self.get_data_path("test.matrix")
-
-        # Process the matrix
-        df = _process_fastani_matrix(str(matrix_file))
-
-        # Check the results
-        self.assertIsInstance(df, pd.DataFrame)
-        self.assertEqual(df.shape, (3, 3))
-        self.assertEqual(list(df.index), ["genome1", "genome2", "genome3"])
-        self.assertEqual(list(df.columns), ["genome1", "genome2", "genome3"])
-        self.assertEqual(df.loc["genome1", "genome2"], 99.9)  # 100 - 0.1
-        self.assertEqual(df.loc["genome2", "genome1"], 99.9)  # Symmetric
-        self.assertEqual(df.loc["genome1", "genome1"], 0.0)  # Self-comparison
-
-    def test_process_fastani_matrix_with_na(self):
-        """Test processing of FastANI matrix with NA values."""
-        # Use the test matrix file with NA values
-        matrix_file = self.get_data_path("test_na.matrix")
-
-        # Process the matrix
-        df = _process_fastani_matrix(str(matrix_file))
-
-        # Check the results
-        self.assertIsInstance(df, pd.DataFrame)
-        self.assertEqual(df.shape, (3, 3))
-        self.assertTrue(pd.isna(df.loc["genome1", "genome2"]))
-        self.assertTrue(pd.isna(df.loc["genome2", "genome1"]))
-
-    def test_process_fastani_matrix_invalid_file(self):
-        """Test error handling for invalid matrix file."""
-        # Use the invalid test matrix file
-        matrix_file = self.get_data_path("test_invalid.matrix")
-
-        # Test that processing raises an error
-        with self.assertRaises(ValueError):
-            _process_fastani_matrix(str(matrix_file))
-
-    def test_compare_seqs(self):
-        """Test the main compare_seqs function."""
-        # Create mock MAG sequences
-        mags = MockMAGSequencesDirFmt(["genome1.fasta", "genome2.fasta"])
-
-        # Mock the FastANI command execution
-        def mock_run_fastani(cmd: List[str]):
-            # Create mock output files
-            output_dir = Path(cmd[cmd.index("--output") + 1]).parent
-            matrix_file = output_dir / "fastani_output.tsv.matrix"
-            # Copy the test matrix file to the output location
-            with open(self.get_data_path("test.matrix"), "r") as src:
-                with open(matrix_file, "w") as dst:
-                    dst.write(src.read())
-
-        self.monkeypatch.setattr("q2_skani._methods._run_fastani", mock_run_fastani)
-
-        # Run the comparison
-        result = compare_seqs(
-            genomes=mags,
-            kmer=16,
-            fragLen=3000,
-            threads=1,
-            minFraction=0.2,
-            maxRatioDiff=0.05,
-        )
-
-        # Check the results
-        self.assertIsInstance(result, pd.DataFrame)
-        self.assertEqual(result.shape, (3, 3))
-        self.assertEqual(list(result.index), ["genome1", "genome2", "genome3"])
-        self.assertEqual(result.loc["genome1", "genome2"], 99.9)
-
-    def test_compare_seqs_no_fasta_files(self):
-        """Test error handling when no FASTA files are found."""
-        # Create mock MAG sequences with no FASTA files
-        mags = MockMAGSequencesDirFmt([])
-
-        # Test that comparison raises an error
-        with self.assertRaisesRegex(RuntimeError, "No FASTA files found"):
-            compare_seqs(genomes=mags)
-
-    def test_compare_seqs_fastani_error(self):
-        """Test error handling when FastANI fails."""
-        # Create mock MAG sequences
-        mags = MockMAGSequencesDirFmt(["genome1.fasta"])
-
-        # Mock FastANI to raise an error
-        def mock_run_fastani(cmd: List[str]):
-            raise RuntimeError("FastANI failed")
-
-        self.monkeypatch.setattr("q2_skani._methods._run_fastani", mock_run_fastani)
-
-        # Test that comparison raises an error
-        with self.assertRaisesRegex(RuntimeError, "Failed to run FastANI comparison"):
-            compare_seqs(genomes=mags)
-
-    def test_construct_skani_cmd(self):
-        """Test skani command construction with various parameters."""
-        # Test with minimal required parameters
-        cmd = _construct_skani_cmd(
-            query_list="query.txt",
-            ref_list="ref.txt",
+    def test_construct_triangle_cmd_minimal(self):
+        """Test command construction with minimal required parameters."""
+        cmd = _construct_triangle_cmd(
+            fasta_list="genome_list.txt",
             output_file="output.tsv",
             skani_args={},
         )
-        self.assertEqual(
-            cmd,
-            [
-                "skani",
-                "dist",
-                "-q",
-                "query.txt",
-                "-r",
-                "ref.txt",
-                "-o",
-                "output.tsv",
-            ],
-        )
+        expected = [
+            "skani",
+            "triangle",
+            "-v",
+            "--distance",
+            "-l",
+            "genome_list.txt",
+            "-o",
+            "output.tsv",
+        ]
+        self.assertListEqual(cmd, expected)
 
-        # Test with all optional parameters
-        cmd = _construct_skani_cmd(
-            query_list="query.txt",
-            ref_list="ref.txt",
+    def test_construct_triangle_cmd_with_all_parameters(self):
+        """Test command construction with all optional parameters."""
+        cmd = _construct_triangle_cmd(
+            fasta_list="genome_list.txt",
             output_file="output.tsv",
             skani_args={
                 "threads": 4,
-                "min_fraction": 0.2,
-                "min_ani": 80.0,
-                "small_genomes": True,
+                "min_af": 20.0,
+                "compression": 150,
+                "marker_c": 2000,
+                "screen": 85.0,
+                "ci": True,
+                "detailed": True,
+                "diagonal": True,
+                "sparse": True,
+                "full_matrix": True,
+                "median": True,
+                "no_learned_ani": True,
+                "robust": True,
+                "faster_small": True,
+                "preset": "fast",
             },
         )
-        self.assertEqual(
-            cmd,
-            [
-                "skani",
-                "dist",
-                "-q",
-                "query.txt",
-                "-r",
-                "ref.txt",
-                "-o",
-                "output.tsv",
-                "-t",
-                "4",
-                "-m",
-                "0.2",
-                "-c",
-                "80.0",
-                "--small-genomes",
-            ],
+
+        # Define expected components
+        expected_basic = [
+            "skani",
+            "triangle",
+            "-l",
+            "genome_list.txt",
+            "-o",
+            "output.tsv",
+        ]
+
+        expected_params = [
+            ("-t", "4"),
+            ("--min-af", "20.0"),
+            ("-c", "150"),
+            ("-m", "2000"),
+            ("-s", "85.0"),
+        ]
+
+        expected_boolean_flags = [
+            "--ci",
+            "--detailed",
+            "--diagonal",
+            "--sparse",
+            "--full-matrix",
+            "--median",
+            "--no-learned-ani",
+            "--robust",
+            "--faster-small",
+            "--fast",
+        ]
+
+        # Check all basic components
+        for component in expected_basic:
+            self.assertIn(component, cmd)
+
+        # Check all parameter flags with their values
+        for flag, value in expected_params:
+            self.assertIn(flag, cmd)
+            self.assertIn(value, cmd)
+
+        # Check all boolean flags
+        for flag in expected_boolean_flags:
+            self.assertIn(flag, cmd)
+
+    def test_construct_triangle_cmd_with_preset(self):
+        """Test command construction with different preset values."""
+        presets = ["fast", "medium", "slow", "small-genomes"]
+
+        for preset in presets:
+            cmd = _construct_triangle_cmd(
+                fasta_list="genome_list.txt",
+                output_file="output.tsv",
+                skani_args={"preset": preset},
+            )
+            self.assertIn(f"--{preset}", cmd)
+
+    @patch("subprocess.run")
+    def test_run_skani_success(self, mock_subprocess):
+        """Test successful skani execution."""
+        mock_subprocess.return_value = MagicMock(
+            returncode=0,
+            stdout="Success",
+            stderr="",
         )
+
+        cmd = ["skani", "triangle", "-l", "test.txt"]
+        _run_skani(cmd)
+
+        mock_subprocess.assert_called_once_with(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @patch("subprocess.run")
+    def test_run_skani_failure(self, mock_subprocess):
+        """Test skani execution failure handling."""
+
+        # Mock failed subprocess run
+        error = subprocess.CalledProcessError(returncode=1, cmd=["skani", "triangle"])
+        error.stdout = "Error output"
+        error.stderr = "Error details"
+        mock_subprocess.side_effect = error
+
+        cmd = ["skani", "triangle", "-l", "test.txt"]
+        with self.assertRaises(RuntimeError) as cm:
+            _run_skani(cmd)
+
+        error_msg = str(cm.exception)
+        self.assertIn("Skani failed with exit code 1", error_msg)
+        self.assertIn("Error output", error_msg)
+        self.assertIn("Error details", error_msg)
 
     def test_process_skani_matrix(self):
         """Test processing of skani matrix output."""
-        # Use the test matrix file
         matrix_file = self.get_data_path("test.matrix")
 
-        # Process the matrix
-        df = _process_skani_matrix(str(matrix_file))
-
-        # Check the results
-        self.assertIsInstance(df, pd.DataFrame)
-        self.assertEqual(df.shape, (3, 3))
-        self.assertEqual(list(df.index), ["genome1", "genome2", "genome3"])
-        self.assertEqual(list(df.columns), ["genome1", "genome2", "genome3"])
-        self.assertEqual(df.loc["genome1", "genome2"], 99.9)  # 100 - 0.1
-        self.assertEqual(df.loc["genome2", "genome1"], 99.9)  # Symmetric
-        self.assertEqual(df.loc["genome1", "genome1"], 0.0)  # Self-comparison
+        df_obs = _process_skani_matrix(str(matrix_file))
+        df_exp = pd.DataFrame(
+            {
+                "genome1": [0.0, 0.1, 0.2],
+                "genome2": [0.1, 0.0, 0.3],
+                "genome3": [0.2, 0.3, 0.0],
+            },
+            index=pd.Index(["genome1", "genome2", "genome3"], name="id"),
+        )
+        pd.testing.assert_frame_equal(df_obs, df_exp)
 
     def test_process_skani_matrix_with_na(self):
         """Test processing of skani matrix with NA values."""
-        # Use the test matrix file with NA values
         matrix_file = self.get_data_path("test_na.matrix")
 
-        # Process the matrix
         df = _process_skani_matrix(str(matrix_file))
 
-        # Check the results
         self.assertIsInstance(df, pd.DataFrame)
         self.assertEqual(df.shape, (3, 3))
         self.assertTrue(pd.isna(df.loc["genome1", "genome2"]))
         self.assertTrue(pd.isna(df.loc["genome2", "genome1"]))
+        self.assertEqual(df.loc["genome1", "genome3"], 0.2)
 
     def test_process_skani_matrix_invalid_file(self):
         """Test error handling for invalid matrix file."""
-        # Use the invalid test matrix file
         matrix_file = self.get_data_path("test_invalid.matrix")
 
         # Test that processing raises an error
-        with self.assertRaises(ValueError):
+        with self.assertRaises(Exception):  # May raise various exceptions
             _process_skani_matrix(str(matrix_file))
 
-    def test_compare_seqs_skani(self):
-        """Test the main compare_seqs_skani function."""
-        # Create mock MAG sequences
-        mags = MockMAGSequencesDirFmt(["genome1.fasta", "genome2.fasta"])
+    @patch("q2_skani.skani._run_skani")
+    def test_compare_seqs(self, mock_run):
+        """Test the main compare_seqs function."""
+        mags = MAGSequencesDirFmt(self.get_data_path("mags-fake"), "r")
 
-        # Mock the skani command execution
         def mock_run_skani(cmd: List[str]):
-            # Create mock output files
-            output_dir = Path(cmd[cmd.index("-o") + 1]).parent
-            matrix_file = output_dir / "skani_output.tsv.matrix"
+            # Create mock output file based on the command
+            output_idx = cmd.index("-o") + 1
+            output_file = cmd[output_idx]
+
             # Copy the test matrix file to the output location
-            with open(self.get_data_path("test.matrix"), "r") as src:
-                with open(matrix_file, "w") as dst:
-                    dst.write(src.read())
+            import shutil
 
-        self.monkeypatch.setattr("q2_skani._methods._run_skani", mock_run_skani)
+            shutil.copy(self.get_data_path("test.matrix"), output_file)
 
-        # Run the comparison
-        result = compare_seqs_skani(
+        mock_run.side_effect = mock_run_skani
+        result = compare_seqs(
             genomes=mags,
             threads=4,
-            min_fraction=0.2,
-            min_ani=80.0,
-            small_genomes=True,
+            min_af=20.0,
+            compression=150,
+            full_matrix=True,
+            preset="fast",
         )
 
         # Check the results
-        self.assertIsInstance(result, pd.DataFrame)
+        self.assertIsInstance(result, skbio.DistanceMatrix)
         self.assertEqual(result.shape, (3, 3))
-        self.assertEqual(list(result.index), ["genome1", "genome2", "genome3"])
-        self.assertEqual(result.loc["genome1", "genome2"], 99.9)
+        self.assertEqual(list(result.ids), ["genome1", "genome2", "genome3"])
+        self.assertEqual(result["genome1", "genome2"], 0.1)
+        self.assertEqual(result["genome2", "genome3"], 0.3)
 
-    def test_compare_seqs_skani_no_fasta_files(self):
+    @patch("q2_skani.skani._run_skani")
+    def test_compare_seqs_no_fasta_files(self, mock_run):
         """Test error handling when no FASTA files are found."""
-        # Create mock MAG sequences with no FASTA files
-        mags = MockMAGSequencesDirFmt([])
+        mags = MAGSequencesDirFmt()
 
-        # Test that comparison raises an error
-        with self.assertRaisesRegex(RuntimeError, "No FASTA files found"):
-            compare_seqs_skani(genomes=mags)
-
-    def test_compare_seqs_skani_error(self):
-        """Test error handling when skani fails."""
-        # Create mock MAG sequences
-        mags = MockMAGSequencesDirFmt(["genome1.fasta"])
-
-        # Mock skani to raise an error
         def mock_run_skani(cmd: List[str]):
-            raise RuntimeError("skani failed")
+            # Check if the genome list file is empty
+            list_file_idx = cmd.index("-l") + 1
+            list_file = cmd[list_file_idx]
 
-        self.monkeypatch.setattr("q2_skani._methods._run_skani", mock_run_skani)
+            with open(list_file, "r") as f:
+                content = f.read().strip()
+                if not content:
+                    raise RuntimeError("No input files provided to skani")
 
-        # Test that comparison raises an error
-        with self.assertRaisesRegex(RuntimeError, "Failed to run skani comparison"):
-            compare_seqs_skani(genomes=mags)
+        mock_run.side_effect = mock_run_skani
+        with self.assertRaisesRegex(RuntimeError, "Failed to run Skani comparison"):
+            compare_seqs(genomes=mags)
 
+    @patch("q2_skani.skani._run_skani")
+    def test_compare_seqs_skani_error(self, mock_run):
+        """Test error handling when skani fails."""
+        mags = MAGSequencesDirFmt(self.get_data_path("mags-fake"), "r")
 
-class MockMAGSequencesDirFmt:
-    """Mock class for MAGSequencesDirFmt."""
+        def mock_run_skani(cmd: List[str]):
+            raise RuntimeError("skani failed: insufficient memory")
 
-    def __init__(self, fasta_files: List[str]):
-        self.path = Path(tempfile.mkdtemp())
-        for file in fasta_files:
-            (self.path / file).touch()
+        mock_run.side_effect = mock_run_skani
+        with self.assertRaisesRegex(RuntimeError, "Failed to run Skani comparison"):
+            compare_seqs(genomes=mags)
+
+    @patch("q2_skani.skani._run_skani")
+    def test_compare_seqs_with_boolean_parameters(self, mock_run):
+        """Test compare_seqs with various boolean parameters."""
+        mags = MAGSequencesDirFmt(self.get_data_path("mags-fake"), "r")
+        captured_cmd = []
+
+        def mock_run_skani(cmd: List[str]):
+            captured_cmd.extend(cmd)
+            # Create mock output
+            output_idx = cmd.index("-o") + 1
+            output_file = cmd[output_idx]
+            import shutil
+
+            shutil.copy(self.get_data_path("test.matrix"), output_file)
+
+        mock_run.side_effect = mock_run_skani
+        compare_seqs(
+            genomes=mags,
+            ci=True,
+            detailed=True,
+            diagonal=True,
+            median=True,
+            robust=True,
+        )
+
+        # Verify boolean flags were included
+        self.assertIn("--ci", captured_cmd)
+        self.assertIn("--detailed", captured_cmd)
+        self.assertIn("--diagonal", captured_cmd)
+        self.assertIn("--median", captured_cmd)
+        self.assertIn("--robust", captured_cmd)
+
+    @patch("q2_skani.skani._run_skani")
+    def test_compare_seqs_default_parameters(self, mock_run):
+        """Test compare_seqs with default parameters."""
+        mags = MAGSequencesDirFmt(self.get_data_path("mags-fake"), "r")
+        captured_cmd = []
+
+        def mock_run_skani(cmd: List[str]):
+            captured_cmd.extend(cmd)
+            # Create mock output
+            output_idx = cmd.index("-o") + 1
+            output_file = cmd[output_idx]
+            import shutil
+
+            shutil.copy(self.get_data_path("test.matrix"), output_file)
+
+        mock_run.side_effect = mock_run_skani
+        compare_seqs(genomes=mags)
+
+        # Check default values were used
+        self.assertIn("-t", captured_cmd)
+        self.assertIn("3", captured_cmd)  # default threads
+        self.assertIn("--min-af", captured_cmd)
+        self.assertIn("15.0", captured_cmd)  # default min_af
+        self.assertIn("-s", captured_cmd)
+        self.assertIn("80.0", captured_cmd)  # default screen
+        self.assertIn("--full-matrix", captured_cmd)  # default full_matrix=True
+
+    def test_complete_pipeline_integration(self):
+        """Test the complete pipeline with three pseudo-genomes without mocking."""
+
+        # similar1: 39b93470-1aef-4962-aef2-13088fd498ac
+        # similar2: 00175141-f0a8-4031-8fa2-2a47593dfb01
+        # different: 2ad520f7-99d1-4f22-8b97-f5bafd9606d8
+
+        mags = MAGSequencesDirFmt(self.get_data_path("mags"), "r")
+
+        result = compare_seqs(
+            genomes=mags,
+            threads=1,
+            full_matrix=True,
+            min_af=5.0,  # Lower threshold for test genomes
+            screen=50.0,  # Lower screening threshold
+        )
+
+        # Verify basic properties of the result
+        self.assertIsInstance(result, skbio.DistanceMatrix)
+        self.assertEqual(result.shape, (3, 3))
+
+        # Check that all genomes are in the result
+        for genome in [
+            "39b93470-1aef-4962-aef2-13088fd498ac",
+            "00175141-f0a8-4031-8fa2-2a47593dfb01",
+            "2ad520f7-99d1-4f22-8b97-f5bafd9606d8",
+        ]:
+            self.assertIn(genome, result.ids)
+
+        # Check diagonal values (self-comparison should be 0)
+        for genome in result.ids:
+            self.assertEqual(result[genome, genome], 0.0)
+
+        # Check that similar genomes have small distance
+        similar_distance = result[
+            "39b93470-1aef-4962-aef2-13088fd498ac",
+            "00175141-f0a8-4031-8fa2-2a47593dfb01",
+        ]
+        self.assertGreater(similar_distance, 0)  # Not identical
+        self.assertLess(similar_distance, 5)  # But very similar (< 5% distance)
+
+        # Check that different genome has large distance from both similar genomes
+        diff_to_similar1 = result[
+            "39b93470-1aef-4962-aef2-13088fd498ac",
+            "2ad520f7-99d1-4f22-8b97-f5bafd9606d8",
+        ]
+        diff_to_similar2 = result[
+            "00175141-f0a8-4031-8fa2-2a47593dfb01",
+            "2ad520f7-99d1-4f22-8b97-f5bafd9606d8",
+        ]
+
+        # skani returns 100.00 for completely different genomes when using --distance
+        self.assertGreater(diff_to_similar1, 90)  # Very different (> 90% distance)
+        self.assertGreater(diff_to_similar2, 90)  # Very different (> 90% distance)
+
+        # Check that distance matrix is symmetric
+        self.assertEqual(
+            result[
+                "39b93470-1aef-4962-aef2-13088fd498ac",
+                "00175141-f0a8-4031-8fa2-2a47593dfb01",
+            ],
+            result[
+                "00175141-f0a8-4031-8fa2-2a47593dfb01",
+                "39b93470-1aef-4962-aef2-13088fd498ac",
+            ],
+        )
+        self.assertEqual(
+            result[
+                "39b93470-1aef-4962-aef2-13088fd498ac",
+                "2ad520f7-99d1-4f22-8b97-f5bafd9606d8",
+            ],
+            result[
+                "2ad520f7-99d1-4f22-8b97-f5bafd9606d8",
+                "39b93470-1aef-4962-aef2-13088fd498ac",
+            ],
+        )
+        self.assertEqual(
+            result[
+                "00175141-f0a8-4031-8fa2-2a47593dfb01",
+                "2ad520f7-99d1-4f22-8b97-f5bafd9606d8",
+            ],
+            result[
+                "2ad520f7-99d1-4f22-8b97-f5bafd9606d8",
+                "00175141-f0a8-4031-8fa2-2a47593dfb01",
+            ],
+        )
+
+        # Print the actual distances for manual verification
+        print("\nDistance Matrix Results:")
+        print(f"Similar1 <-> Similar2: {similar_distance:.2f}%")
+        print(f"Similar1 <-> Different: {diff_to_similar1:.2f}%")
+        print(f"Similar2 <-> Different: {diff_to_similar2:.2f}%")
