@@ -5,10 +5,4 @@
 
 ## Installation instructions
 
-You can install q2-gunc using the provided conda environment files, for example:
-
-```shell
-conda env create -n q2-gunc --file  https://raw.githubusercontent.com/bokulich-lab/q2-gunc/main/environment-files/q2-gunc-qiime2-tiny-2025.7.yml
-```
-
-For more information head to the [QIIME 2 Library](https://library.qiime2.org/plugins/caporaso-lab/q2-gunc).
+For installation instructions head to the [QIIME 2 Library](https://library.qiime2.org/plugins/bokulich-lab/q2-skani).
