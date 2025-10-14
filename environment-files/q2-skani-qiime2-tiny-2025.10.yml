@@ -1,0 +1,10 @@
+channels:
+- https://packages.qiime2.org/qiime2/2025.10/tiny/released
+- conda-forge
+- bioconda
+dependencies:
+  - qiime2-tiny
+  - skani
+  - pip
+  - pip:
+      - q2-skani@git+https://github.com/bokulich-lab/q2-skani.git@main
